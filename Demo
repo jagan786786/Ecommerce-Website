@@ -1,0 +1,364 @@
+// ============================================================
+// FILE 1
+// src/libs/common/utils/getUnitStatusDisplayStatus.ts
+// ============================================================
+
+import { UnitStatuses } from '@src/types/databaseSeedsType';
+
+export const CB_RETAIL_MIGRATION_TO_DEVICE_SWAP: Partial<
+  Record<UnitStatuses, UnitStatuses>
+> = {
+  [UnitStatuses.CB_RETAIL_MIGRATION_CANCELED]:
+    UnitStatuses.DEVICE_SWAP_CANCELED,
+  [UnitStatuses.CB_RETAIL_MIGRATION_COMPLETED]:
+    UnitStatuses.DEVICE_SWAP_COMPLETED,
+  [UnitStatuses.CB_RETAIL_MIGRATION_FAILED]:
+    UnitStatuses.DEVICE_SWAP_FAILED,
+  [UnitStatuses.CB_RETAIL_MIGRATION_PENDING]:
+    UnitStatuses.DEVICE_SWAP_PENDING,
+};
+
+export const shouldTreatCbRetailAsDeviceSwap = (
+  isHsdRetail: boolean,
+  hasMigration: boolean,
+): boolean => isHsdRetail && !hasMigration;
+
+export const getUnitStatusDisplayStatus = (
+  status: UnitStatuses,
+  hasMigration: boolean,
+  isHsdRetail: boolean,
+): UnitStatuses => {
+  if (!shouldTreatCbRetailAsDeviceSwap(isHsdRetail, hasMigration)) {
+    return status;
+  }
+
+  return CB_RETAIL_MIGRATION_TO_DEVICE_SWAP[status] ?? status;
+};
+
+export const getUnitStatusI18nKey = (
+  status: string | null | undefined,
+  hasMigration: boolean,
+  isHsdRetail: boolean,
+): string | undefined => {
+  if (!status) {
+    return undefined;
+  }
+
+  const displayStatus: UnitStatuses = getUnitStatusDisplayStatus(
+    status as UnitStatuses,
+    hasMigration,
+    isHsdRetail,
+  );
+
+  return Object.entries(UnitStatuses).find(
+    ([, value]: [string, UnitStatuses]) => value === displayStatus,
+  )?.[0];
+};
+
+export const matchesStatusFilter = (
+  unitStatus: string | null | undefined,
+  selectedStatuses: readonly string[],
+  hasMigration: boolean,
+  isHsdRetail: boolean,
+): boolean => {
+  if (selectedStatuses.length === 0) {
+    return true;
+  }
+
+  if (!unitStatus) {
+    return false;
+  }
+
+  const displayStatus: UnitStatuses = getUnitStatusDisplayStatus(
+    unitStatus as UnitStatuses,
+    hasMigration,
+    isHsdRetail,
+  );
+
+  return selectedStatuses.includes(displayStatus);
+};
+
+export default getUnitStatusDisplayStatus;
+
+
+// ============================================================
+// FILE 4
+// src/libs/common/components/InstallationStatusInfo/InstallationStatusInfo.tsx
+// ============================================================
+
+import getUnitStatusDisplayStatus, {
+  getUnitStatusI18nKey,
+} from '@src/libs/common/utils/getUnitStatusDisplayStatus';
+
+// ... existing imports
+
+interface InstallationStatusInfoProps {
+  // ... existing props
+
+  /** When true, CB retail migration statuses keep their conversion wording. */
+  hasMigration?: boolean;
+
+  /** Property is HSD Retail -- gates the CB retail -> device swap mapping. */
+  isHsdRetail?: boolean;
+}
+
+const InstallationStatusInfo: React.FC<InstallationStatusInfoProps> = ({
+  // ... existing props
+  status,
+  onHoldComment,
+  hasMigration,
+  isHsdRetail,
+  // ... existing props
+}) => {
+  // ---- derive ONCE, before anything else reads the status ----
+  // FIXME: Eventually can remove checking against InstallationStatus
+  const isUnitStatus: boolean = (
+    Object.values(UnitStatuses) as string[]
+  ).includes(status as string);
+
+  const displayStatus: Nullable<
+    InstallationStatus | UnitStatuses
+  > = isUnitStatus
+    ? getUnitStatusDisplayStatus(
+        status as UnitStatuses,
+        !!hasMigration,
+        !!isHsdRetail,
+      )
+    : status;
+
+  const unitStatusKey: string | undefined = isUnitStatus
+    ? getUnitStatusI18nKey(
+        status,
+        !!hasMigration,
+        !!isHsdRetail,
+      )
+    : undefined;
+
+  const iconColor: string =
+    statusColorMapping[displayStatus as UnitStatuses];
+
+  // ----------------------------------------------------------
+  // IMPORTANT:
+  // From this point onward, use `displayStatus` whenever
+  // reading the status for display logic.
+  // ----------------------------------------------------------
+
+  // Example:
+  // const iconName = getIconName(displayStatus);
+  //
+  // Example:
+  // switch (displayStatus) {
+  //   ...
+  // }
+
+  const label: string = unitStatusKey
+    ? i18n.t(`unitStatuses.${unitStatusKey}`)
+    : String(status);
+
+  return (
+    // ... existing JSX
+    // Replace status reads used for display with displayStatus.
+    // Keep the original `status` only where the raw backend
+    // status is actually required.
+    <>
+      {/* existing component JSX */}
+    </>
+  );
+};
+
+export default InstallationStatusInfo;
+
+
+// ============================================================
+// FILE 5
+// src/libs/property-onboarding/components/PropertyInstallationSummary/PropertyInstallationSummary.tsx
+// ============================================================
+
+import { matchesStatusFilter } from '@src/libs/common/utils/getUnitStatusDisplayStatus';
+
+// ... existing imports
+// Keep useGetPropertyHSDService import.
+
+// ...
+
+const PropertyInstallationSummary = () => {
+  // ... existing code
+
+  const { data: tsProperty } =
+    useFetchPropertyQuery(vendorId ?? skipToken);
+
+  const hasMigration: boolean = tsProperty?.migration != null;
+
+  // Keep the SAME argument that the existing code already uses.
+  const { isHSDRetail } =
+    useGetPropertyHSDService(/* existing arg */);
+
+  const isHsdRetail: boolean = !!isHSDRetail;
+
+  // ... existing code
+
+  if (locationFilters.status.length > 0) {
+    result = result.filter(
+      (unit: UnitWithOrdersFull): boolean =>
+        matchesStatusFilter(
+          unit.status,
+          locationFilters.status,
+          hasMigration,
+          isHsdRetail,
+        ),
+    );
+  }
+
+  // ... existing code
+
+  return (
+    <>
+      {/* ... existing JSX */}
+
+      <LocationsListCard
+        // ... existing props
+        hasMigration={hasMigration}
+        isHsdRetail={isHsdRetail}
+      />
+
+      {/* ... existing JSX */}
+    </>
+  );
+};
+
+export default PropertyInstallationSummary;
+
+
+// ============================================================
+// FILE 6
+// src/libs/property-change-of-service/components/CoSLocationAccountConversionSummary/internal/LocationsListCard.tsx
+// ============================================================
+
+interface LocationsListCardParams {
+  unit: UnitWithOrdersFull;
+  onCardClick: /* existing type */;
+  setIsChecked: (unit: UnitWithOrdersFull) => void;
+  isChecked: boolean;
+  tableInFocus: TableNames;
+  hasMigration?: boolean;
+  isHsdRetail?: boolean;
+}
+
+const LocationsListCard: React.FC<LocationsListCardParams> = ({
+  unit,
+  onCardClick,
+  setIsChecked,
+  isChecked,
+  tableInFocus,
+  hasMigration,
+  isHsdRetail,
+}: LocationsListCardParams): Element => {
+  // ... existing code
+
+  return (
+    <>
+      {/* ... existing JSX */}
+
+      <InstallationStatusInfo
+        // ... existing props
+        onHoldComment={unit.onholdComments || undefined}
+        hasMigration={hasMigration}
+        isHsdRetail={isHsdRetail}
+      />
+
+      {/* ... existing JSX */}
+    </>
+  );
+};
+
+export default LocationsListCard;
+
+
+// ============================================================
+// FILE 7
+// src/libs/property-serviceability-details/components/ServiceabilityDetailsHero/ServiceabilityDetailsHero.tsx
+// ============================================================
+
+import { getUnitStatusI18nKey } from '@src/libs/common/utils/getUnitStatusDisplayStatus';
+
+// ... existing imports
+
+const ServiceabilityDetailsHero = () => {
+  // ... existing code
+
+  const {
+    data: tsProperty,
+    isSuccess,
+  } = useFetchPropertyQuery(vendorId ?? skipToken);
+
+  // isSuccess guard:
+  // while the query is in flight tsProperty is undefined,
+  // so hasMigration would be false and the label could flash
+  // the wrong text.
+  const hasMigration: boolean =
+    isSuccess && tsProperty?.migration != null;
+
+  const { isHSDRetail } =
+    useGetPropertyHSDService(currentPropertyApplications);
+
+  const unitStatusKey: string | undefined =
+    getUnitStatusI18nKey(
+      unit?.status,
+      hasMigration,
+      !!isHSDRetail,
+    );
+
+  // ... existing code
+
+  return (
+    <>
+      {/* ... existing JSX */}
+
+      <SomeComponent
+        // ... existing props
+        xlabel={
+          unitStatusKey
+            ? i18n.t(`unitStatuses.${unitStatusKey}`)
+            : '-'
+        }
+      />
+
+      {/* ... existing JSX */}
+    </>
+  );
+};
+
+export default ServiceabilityDetailsHero;
+
+
+// ============================================================
+// FILE 8
+// src/libs/property-change-of-service/components/CoSLocationAccountConversionSummary/CoSLocationAccountConversionSummary.tsx
+// ============================================================
+
+// ... existing imports
+
+const CoSLocationAccountConversionSummary = () => {
+  // ... existing code
+
+  const { isHSDRetail } =
+    useGetPropertyHSDService(currentPropertyApplications);
+
+  // ... existing code
+
+  return (
+    <>
+      {/* ... existing JSX */}
+
+      <LocationsListCard
+        // ... existing props
+        hasMigration={migration != null}
+        isHsdRetail={!!isHSDRetail}
+      />
+
+      {/* ... existing JSX */}
+    </>
+  );
+};
+
+export default CoSLocationAccountConversionSummary;
